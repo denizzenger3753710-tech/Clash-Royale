@@ -1,0 +1,352 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Clash Clone - Mobile Strategy</title>
+    <style>
+        :root {
+            --river: #2980b9;
+            --grass: #27ae60;
+            --bridge: #95a5a6;
+            --elixir-color: #f368e0;
+        }
+
+        body {
+            margin: 0;
+            background: #1a1a1a;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            font-family: 'Arial Black', sans-serif;
+            color: white;
+            overflow: hidden;
+            height: 100vh;
+        }
+
+        /* Arena Alanı */
+        #game-wrapper {
+            position: relative;
+            margin-top: 10px;
+            border: 6px solid #34495e;
+            border-radius: 15px;
+            overflow: hidden;
+            background: var(--grass);
+        }
+
+        canvas { display: block; cursor: pointer; }
+
+        /* UI Alt Panel */
+        #bottom-ui {
+            width: 400px;
+            background: #2c3e50;
+            padding: 15px;
+            border-radius: 0 0 15px 15px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 10px;
+        }
+
+        /* Kart Slotları */
+        .card-container {
+            display: flex;
+            gap: 10px;
+        }
+
+        .card {
+            width: 75px;
+            height: 100px;
+            background: linear-gradient(145deg, #ecf0f1, #bdc3c7);
+            border-radius: 10px;
+            border: 3px solid #7f8c8d;
+            position: relative;
+            cursor: pointer;
+            transition: all 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            color: #2c3e50;
+        }
+
+        .card:hover { transform: scale(1.1); z-index: 10; }
+        .card.active { border-color: #f1c40f; box-shadow: 0 0 15px #f1c40f; transform: translateY(-5px); }
+        .card.disabled { filter: grayscale(1) opacity(0.5); cursor: not-allowed; }
+
+        .card .cost-badge {
+            position: absolute;
+            top: -8px;
+            left: -8px;
+            background: var(--elixir-color);
+            color: white;
+            width: 24px;
+            height: 24px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 14px;
+            border: 2px solid white;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+        }
+
+        .card .emoji { font-size: 35px; }
+        .card .label { font-size: 10px; margin-top: 5px; text-transform: uppercase; }
+
+        /* İksir Barı */
+        .elixir-wrapper {
+            width: 100%;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        #elixir-bar-bg {
+            flex-grow: 1;
+            height: 18px;
+            background: #1e272e;
+            border-radius: 10px;
+            border: 2px solid #576574;
+            overflow: hidden;
+            position: relative;
+        }
+
+        #elixir-fill {
+            height: 100%;
+            width: 50%;
+            background: linear-gradient(90deg, #ff9ff3, var(--elixir-color));
+            transition: width 0.1s linear;
+        }
+
+        #elixir-count { font-size: 18px; min-width: 20px; color: var(--elixir-color); }
+
+    </style>
+</head>
+<body>
+
+<div id="game-wrapper">
+    <canvas id="gameCanvas" width="380" height="550"></canvas>
+</div>
+
+<div id="bottom-ui">
+    <div class="elixir-wrapper">
+        <span id="elixir-count">5</span>
+        <div id="elixir-bar-bg"><div id="elixir-fill"></div></div>
+    </div>
+    <div class="card-container">
+        <div class="card" onclick="selectCard(0)" id="card-0">
+            <div class="cost-badge">3</div>
+            <div class="emoji">⚔️</div>
+            <div class="label">Şövalye</div>
+        </div>
+        <div class="card" onclick="selectCard(1)" id="card-1">
+            <div class="cost-badge">2</div>
+            <div class="emoji">🏹</div>
+            <div class="label">Okçu</div>
+        </div>
+        <div class="card" onclick="selectCard(2)" id="card-2">
+            <div class="cost-badge">5</div>
+            <div class="emoji">🐘</div>
+            <div class="label">Dev</div>
+        </div>
+        <div class="card" onclick="selectCard(3)" id="card-3">
+            <div class="cost-badge">4</div>
+            <div class="emoji">🔥</div>
+            <div class="label">Büyücü</div>
+        </div>
+    </div>
+</div>
+
+<script>
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+
+// Oyun Durumu
+let elixir = 5.0;
+const maxElixir = 10;
+let selectedIdx = -1;
+let units = [];
+let towers = [];
+let particles = [];
+let shake = 0;
+
+// Birim Verileri
+const unitTypes = [
+    { name: 'Knight', hp: 120, dmg: 18, range: 25, speed: 1.1, cost: 3, icon: '⚔️', color: '#3498db' },
+    { name: 'Archer', hp: 60, dmg: 12, range: 120, speed: 1.4, cost: 2, icon: '🏹', color: '#f1c40f' },
+    { name: 'Giant', hp: 400, dmg: 25, range: 30, speed: 0.6, cost: 5, icon: '🐘', color: '#e67e22' },
+    { name: 'Mage', hp: 80, dmg: 35, range: 90, speed: 1.0, cost: 4, icon: '🔥', color: '#9b59b6' }
+];
+
+// Başlangıç: Kuleleri Yerleştir
+function setupTowers() {
+    // Player
+    towers.push({x: 90, y: 450, hp: 600, maxHp: 600, side: 'p', type: 'side'});
+    towers.push({x: 290, y: 450, hp: 600, maxHp: 600, side: 'p', type: 'side'});
+    towers.push({x: 190, y: 500, hp: 1000, maxHp: 1000, side: 'p', type: 'main'});
+    
+    // Enemy
+    towers.push({x: 90, y: 100, hp: 600, maxHp: 600, side: 'e', type: 'side'});
+    towers.push({x: 290, y: 100, hp: 600, maxHp: 600, side: 'e', type: 'side'});
+    towers.push({x: 190, y: 50, hp: 1000, maxHp: 1000, side: 'e', type: 'main'});
+}
+
+// Arena Çizimi (Nehir ve Köprüler)
+function drawArena() {
+    // Nehir
+    ctx.fillStyle = '#2980b9';
+    ctx.fillRect(0, 260, canvas.width, 30);
+    
+    // Köprüler
+    ctx.fillStyle = '#95a5a6';
+    ctx.fillRect(60, 255, 60, 40);
+    ctx.fillRect(260, 255, 60, 40);
+    
+    // Yol Çizgileri
+    ctx.strokeStyle = 'rgba(255,255,255,0.1)';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(20, 20, canvas.width-40, canvas.height-40);
+}
+
+function drawTower(t) {
+    const size = t.type === 'main' ? 45 : 35;
+    const color = t.side === 'p' ? '#2980b9' : '#c0392b';
+    
+    ctx.shadowBlur = 10;
+    ctx.shadowColor = 'black';
+    ctx.fillStyle = color;
+    ctx.fillRect(t.x - size/2, t.y - size/2, size, size);
+    ctx.shadowBlur = 0;
+
+    // Can Barı
+    const bw = 40;
+    ctx.fillStyle = '#444';
+    ctx.fillRect(t.x - bw/2, t.y - size/2 - 10, bw, 6);
+    ctx.fillStyle = t.hp > (t.maxHp * 0.3) ? '#2ecc71' : '#e74c3c';
+    ctx.fillRect(t.x - bw/2, t.y - size/2 - 10, (t.hp/t.maxHp)*bw, 6);
+}
+
+class Unit {
+    constructor(typeIdx, x, y, side) {
+        Object.assign(this, unitTypes[typeIdx]);
+        this.x = x; this.y = y; this.side = side;
+        this.target = null;
+        this.lastAtk = 0;
+    }
+
+    draw() {
+        ctx.save();
+        ctx.translate(this.x, this.y);
+        
+        // Takım halkası
+        ctx.beginPath();
+        ctx.arc(0, 0, 15, 0, Math.PI*2);
+        ctx.fillStyle = this.side === 'p' ? 'rgba(52, 152, 219, 0.5)' : 'rgba(231, 76, 60, 0.5)';
+        ctx.fill();
+
+        // Emoji Sprite
+        ctx.font = "20px Arial";
+        ctx.textAlign = "center";
+        ctx.fillText(this.icon, 0, 7);
+        
+        // Küçük Can Barı
+        ctx.fillStyle = '#2ecc71';
+        ctx.fillRect(-10, -18, (this.hp/unitTypes.find(u=>u.icon===this.icon).hp)*20, 3);
+        ctx.restore();
+    }
+
+    update() {
+        // Hedef bulma (En yakındaki düşman birim veya kule)
+        let potential = [...units.filter(u=>u.side !== this.side), ...towers.filter(t=>t.side !== this.side)];
+        let minDist = Infinity;
+        this.target = null;
+
+        potential.forEach(p => {
+            let d = Math.hypot(p.x - this.x, p.y - this.y);
+            if(d < minDist) { minDist = d; this.target = p; }
+        });
+
+        if(this.target) {
+            if(minDist > this.range) {
+                let angle = Math.atan2(this.target.y - this.y, this.target.x - this.x);
+                this.x += Math.cos(angle) * this.speed;
+                this.y += Math.sin(angle) * this.speed;
+            } else {
+                if(Date.now() - this.lastAtk > 1000) {
+                    this.target.hp -= this.dmg;
+                    this.lastAtk = Date.now();
+                    if(this.target.side) shake = 5; // Kule vurulunca sarsıl
+                }
+            }
+        }
+    }
+}
+
+function selectCard(idx) {
+    if(elixir >= unitTypes[idx].cost) {
+        selectedIdx = idx;
+        document.querySelectorAll('.card').forEach(c => c.classList.remove('active'));
+        document.getElementById(`card-${idx}`).classList.add('active');
+    }
+}
+
+canvas.addEventListener('mousedown', (e) => {
+    if(selectedIdx === -1) return;
+    const rect = canvas.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+
+    if(y > 300 && elixir >= unitTypes[selectedIdx].cost) {
+        units.push(new Unit(selectedIdx, x, y, 'p'));
+        elixir -= unitTypes[selectedIdx].cost;
+        selectedIdx = -1;
+        document.querySelectorAll('.card').forEach(c => c.classList.remove('active'));
+    }
+});
+
+function gameLoop() {
+    ctx.save();
+    if(shake > 0) {
+        ctx.translate(Math.random()*4-2, Math.random()*4-2);
+        shake--;
+    }
+
+    ctx.clearRect(0,0,380,550);
+    drawArena();
+
+    // İksir Mantığı
+    if(elixir < maxElixir) elixir += 0.008;
+    document.getElementById('elixir-fill').style.width = (elixir/maxElixir)*100 + "%";
+    document.getElementById('elixir-count').innerText = Math.floor(elixir);
+
+    // Kuleler
+    towers = towers.filter(t => t.hp > 0);
+    towers.forEach(drawTower);
+
+    // Birimler
+    units = units.filter(u => u.hp > 0);
+    units.forEach(u => { u.update(); u.draw(); });
+
+    // AI
+    if(Math.random() < 0.005) {
+        const aiType = Math.floor(Math.random()*4);
+        units.push(new Unit(aiType, Math.random()*300+40, 50, 'e'));
+    }
+
+    // Kart Kontrolü
+    unitTypes.forEach((u, i) => {
+        const el = document.getElementById(`card-${i}`);
+        if(u.cost > elixir) el.classList.add('disabled');
+        else el.classList.remove('disabled');
+    });
+
+    ctx.restore();
+    requestAnimationFrame(gameLoop);
+}
+
+setupTowers();
+gameLoop();
+</script>
+</body>
+</html>
